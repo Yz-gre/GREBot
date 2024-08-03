@@ -182,4 +182,4 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
     else:
         result = "Invalid command. Use 'expiration' or 'strike'."
 
-client.run()
+client.run(DISCORD_TOKEN)
