@@ -1,2 +1,2 @@
-MZFilePath = '/home/opc/GREBot/TransactionsMZ.csv'
-NTFilePath = '/home/opc/GREBot/TransactionsNT.csv'
+MZFilePath = '/home/GREBot/TransactionsMZ.csv'
+NTFilePath = '/home/GREBot/TransactionsNT.csv'
