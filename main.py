@@ -15,7 +15,7 @@ from gre_commands import (
     account_summary_command, 
     ron_command
 )
-from data_commands import data_expiration, data_strike
+from data_commands import data_expiration, data_strike, data_call_vs_roll
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -150,6 +150,7 @@ async def userid(interaction: discord.Interaction):
 @app_commands.choices(command=[
     app_commands.Choice(name="expiration", value="expiration"),
     app_commands.Choice(name="strike", value="strike"),
+    app_commands.Choice(name="call_vs_roll", value="call_vs_roll")
 ])
 
 async def data(interaction: discord.Interaction, command: str, ticker: str = None, value: str = None):
@@ -180,6 +181,21 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
         pre_notes += f"\nCurrent Price: {tck_prc}"
         formatted_table = f"```\n{result}\n```"
         await interaction.followup.send(f"{pre_notes}\n{formatted_table}")
+    elif command == "call_vs_roll":
+        if not ticker or not value:
+            await interaction.followup.send("Please provide both ticker and strike price.")
+            return
+        try:
+            strike = float(value)
+        except ValueError:
+            await interaction.followup.send("Invalid strike price. Please provide a number.")
+            return
+        tck_prc, result = data_call_vs_roll(ticker, strike)
+        pre_notes = f"Ticker: {ticker}"
+        pre_notes += f"\nStrike Price: ${strike:.2f}"
+        pre_notes += f"\nCurrent Price: {tck_prc}"
+        formatted_table = f"```\n{result}\n```"
+        await interaction.followup.send(f"{pre_notes}\n{formatted_table}")        
     else:
         result = "Invalid command. Use 'expiration' or 'strike'."
 
