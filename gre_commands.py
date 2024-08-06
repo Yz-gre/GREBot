@@ -299,7 +299,9 @@ def bp_command(transaction_data: TransactionData) -> str:
                 print(f"    Processing account: {account}")
                 if balance_type == 'LOC':
                     if account == 'Total' and currency == 'CAD':
-                        balance, breakdown = get_balance('loc_balances', currency=currency)
+                        loc_limit, loc_usage = transaction_data.get_loc_info()
+                        balance = loc_limit - loc_usage
+                        breakdown = {'LOC': balance}
                     else:
                         balance, breakdown = 0, {}
                 elif account == 'Total':
@@ -544,7 +546,7 @@ def account_summary_command(transaction_data: TransactionData) -> str:
 
     print("\nCalculating available BP")
     avail_bp = {}
-    avail_cashstk={}
+    avail_cashstk = {}
     for acc in accounts:
         cash_balance = sum(get_balance('cash_balances', acc, curr) for curr in ['USD', 'CAD'])
         stock_notional = sum(get_balance('stk_notional', acc, curr) for curr in ['USD', 'CAD'])
@@ -554,8 +556,9 @@ def account_summary_command(transaction_data: TransactionData) -> str:
     
     total_cash = sum(avail_bp.values())
     avail_cashstk['Total'] = sum(avail_cashstk.values())
-    loc_balance = get_balance('loc_balances', currency='CAD')
-    avail_bp['Total'] = total_cash + loc_balance
+    loc_limit, loc_usage = transaction_data.get_loc_info()
+    loc_available = adjust_cad_to_usd(loc_limit - loc_usage)
+    avail_bp['Total'] = total_cash + loc_available
     print(f"Total available BP: {avail_bp['Total']}")
 
     print("\nGathering tickers and options")

@@ -1,11 +1,13 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from config import MZFilePath, NTFilePath
+from config import *
 from transaction_data import TransactionData
 from datetime import datetime, timedelta
+from trade_commands import *
 import os
 import logging
+import csv
 from gre_commands import (
     revenue_command, 
     investments_command, 
@@ -31,8 +33,8 @@ class UnregisteredUserError(Exception):
 
 # User ID to TransactionData instance mapping
 USER_DATA_MAPPING = {
-    '719322412138627560': TransactionData(MZFilePath),
-    '903135191365734400': TransactionData(NTFilePath)
+    '719322412138627560': TransactionData(MZFilePath, MZLOCLimit, MZLOCUsage),
+    '903135191365734400': TransactionData(NTFilePath, NTLOCLimit, NTLOCUsage)
 }
 
 # Process CSV for each TransactionData instance
@@ -45,11 +47,17 @@ class MyClient(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
 client = MyClient()
+client.mz_data = None  # This will be set for each user when needed
 
 def get_user_data(user_id):
     if str(user_id) not in USER_DATA_MAPPING:
         raise UnregisteredUserError("User not registered!")
     return USER_DATA_MAPPING[str(user_id)]
+
+def write_to_csv(file_path, data):
+    with open(file_path, 'a', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(data)
 
 @client.event
 async def on_ready():
@@ -198,5 +206,29 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
         await interaction.followup.send(f"{pre_notes}\n{formatted_table}")        
     else:
         result = "Invalid command. Use 'expiration' or 'strike'."
+
+@client.tree.command(name="trade", description="Add a new trade")
+@app_commands.describe(command="Choose a trade type")
+@app_commands.choices(command=[
+    app_commands.Choice(name=cmd, value=cmd) for cmd in [
+        "Add_Trade", "Close_Position", "Roll_Position", "Cov_Call",
+        "Assigned", "Cash_InOut", "Upd_LOC", "Manual", "Delete_Last", "Last_Trade"
+    ]
+])
+async def transaction(interaction: discord.Interaction, command: str):    
+    try:
+        await interaction.response.defer(thinking=True)
+        
+        try:
+            mz_data = get_user_data(interaction.user.id)
+            client.mz_data = mz_data
+        except UnregisteredUserError:
+            await interaction.followup.send("User not registered!")
+            return
+        
+        await handle_trade(interaction, mz_data, command)
+    
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}")
 
 client.run(DISCORD_TOKEN)

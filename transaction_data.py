@@ -11,7 +11,7 @@ import io
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TransactionData:
-    def __init__(self, csv_path=None):
+    def __init__(self, csv_path=None, LOCLimit=0, LOCUsage=0):
         self.transactions: List[Dict[str, str]] = []
         self.daily_balances: Dict[str, Dict[Tuple[str, ...], Dict[datetime, float]]] = {
             'investments': defaultdict(lambda: defaultdict(float)),
@@ -20,12 +20,13 @@ class TransactionData:
             'opt_notional': defaultdict(lambda: defaultdict(float)),
             'stk_shares': defaultdict(lambda: defaultdict(float)),
             'stk_notional': defaultdict(lambda: defaultdict(float)),
-            'cash_balances': defaultdict(lambda: defaultdict(float)),
-            'loc_balances': defaultdict(lambda: defaultdict(float))
+            'cash_balances': defaultdict(lambda: defaultdict(float))            
         }
         self.first_transaction_date: Union[datetime, None] = None
         self.last_update: Union[datetime, None] = None
         self.csv_path = csv_path
+        self.LOCLimit = LOCLimit
+        self.LOCUsage = LOCUsage
 
     def process_csv(self):
         if not os.path.exists(self.csv_path):
@@ -78,10 +79,7 @@ class TransactionData:
                 elif 'personal withdraw' in notes:
                     self.update_daily_balance('investments', (account, currency, 'regular'), date, amount)
 
-            if trans_type != 'LOC':
-                self.update_daily_balance('cash_balances', (account, currency), date, amount)
-            else:
-                self.update_daily_balance('loc_balances', (currency,), date, amount)
+            self.update_daily_balance('cash_balances', (account, currency), date, amount)
 
             if trans_type in ['Put', 'Call', 'Cap Gains', 'Div', 'Int / Tax']:
                 self.update_daily_balance('revenue', (account, currency, ticker, trans_type), date, amount)
@@ -213,8 +211,6 @@ class TransactionData:
                 (account is None or key[0] == account) and
                 (currency is None or key[1] == currency)
             )
-        elif balance_type == 'loc_balances':
-            return currency is None or key[0] == currency
         else:
             return False
     
@@ -224,7 +220,7 @@ class TransactionData:
     
     @lru_cache(maxsize=None)
     def get_accounts(self) -> List[str]:
-        return list(set(key[0] for key in self.daily_balances['cash_balances'].keys() if key[0] != 'LOC'))
+        return list(set(key[0] for key in self.daily_balances['cash_balances'].keys()))
     
     @lru_cache(maxsize=None)
     def get_tickers(self) -> List[str]:
@@ -256,6 +252,9 @@ class TransactionData:
             return f"${value:,.2f}"
         else:
             return f"${value / 1000:.1f}k"
+
+    def get_loc_info(self) -> Tuple[float, float]:
+        return self.LOCLimit, self.LOCUsage
 
     def clear_cache(self):
         self.get_currencies.cache_clear()
