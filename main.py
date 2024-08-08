@@ -5,6 +5,7 @@ from config import *
 from transaction_data import TransactionData
 from datetime import datetime, timedelta
 from trade_commands import *
+from typing import Optional
 import os
 import logging
 import csv
@@ -72,6 +73,7 @@ async def on_ready():
     for command in client.tree.get_commands():
         print(f"- /{command.name}")
 
+# GRE Functions
 @client.tree.command(name="gre", description="Execute GRE commands")
 @app_commands.describe(command="Choose a command to execute")
 @app_commands.choices(command=[
@@ -135,6 +137,7 @@ async def gre(interaction: discord.Interaction, command: str):
         await interaction.followup.send(f"An error occurred while processing the command: {str(e)}")
         logging.error(f"Error in gre command: {str(e)}", exc_info=True)
 
+# Syncing Commands
 @client.tree.command()
 @app_commands.describe(scope="The scope to sync the commands to (global/guild)")
 @app_commands.choices(scope=[
@@ -149,10 +152,12 @@ async def sync(interaction: discord.Interaction, scope: str):
     
     await interaction.response.send_message(f"Synced {len(synced)} commands {'globally' if scope == 'global' else 'to the current guild'}")
 
+# Displaying User ID
 @client.tree.command(name="userid", description="Display your user ID")
 async def userid(interaction: discord.Interaction):
     await interaction.response.send_message(f"Your user ID is: {interaction.user.id}")
 
+# Data Commands
 @client.tree.command(name="data", description="Execute data commands")
 @app_commands.describe(command="Choose a command to execute")
 @app_commands.choices(command=[
@@ -207,28 +212,56 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
     else:
         result = "Invalid command. Use 'expiration' or 'strike'."
 
-@client.tree.command(name="trade", description="Add a new trade")
-@app_commands.describe(command="Choose a trade type")
+# Trade Commands
+@client.tree.command(name="trade", description="Execute trade commands")
+@app_commands.describe(
+    command="Choose a trade type",
+    acct="Account",
+    ticker="Ticker symbol",
+    shares="Number of shares",
+    currency="Currency"
+)
 @app_commands.choices(command=[
     app_commands.Choice(name=cmd, value=cmd) for cmd in [
         "Add_Trade", "Close_Position", "Roll_Position", "Cov_Call",
         "Assigned", "Cash_InOut", "Upd_LOC", "Manual", "Delete_Last", "Last_Trade"
     ]
 ])
-async def transaction(interaction: discord.Interaction, command: str):    
+async def transaction(
+    interaction: discord.Interaction, 
+    command: str,
+    acct: Optional[str] = None,
+    ticker: Optional[str] = None,
+    shares: Optional[int] = None,
+    currency: Optional[str] = None
+):
     try:
-        await interaction.response.defer(thinking=True)
+        # Don't defer the response here
         
         try:
             mz_data = get_user_data(interaction.user.id)
             client.mz_data = mz_data
         except UnregisteredUserError:
-            await interaction.followup.send("User not registered!")
+            await interaction.response.send_message("User not registered!")
             return
         
-        await handle_trade(interaction, mz_data, command)
+        if command == "Add_Trade":
+            if not all([acct, ticker, shares, currency]):
+                await interaction.response.send_message("Please provide all required parameters for Add_Trade.")
+                return
+            await process_add_trade(interaction, mz_data, acct, ticker, shares, currency)
+        elif command == "Close_Position":
+            await process_close_position(interaction, mz_data)
+        elif command in ["Roll_Position", "Cov_Call", "Assigned", "Cash_InOut", "Upd_LOC", "Manual", "Delete_Last", "Last_Trade"]:
+            await interaction.response.send_message(f"{command} functionality not implemented yet.")
+        else:
+            await interaction.response.send_message(f"Unsupported trade type: {command}")
     
     except Exception as e:
-        await interaction.followup.send(f"An error occurred: {str(e)}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message(f"An error occurred: {str(e)}")
+        else:
+            await interaction.followup.send(f"An error occurred: {str(e)}")
+        logging.error(f"Error in trade command: {str(e)}", exc_info=True)
 
 client.run(DISCORD_TOKEN)
