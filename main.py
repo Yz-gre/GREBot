@@ -84,7 +84,8 @@ async def on_ready():
     app_commands.Choice(name="bp", value="bp"),
     app_commands.Choice(name="positions", value="positions"),
     app_commands.Choice(name="summary", value="summary"),
-    app_commands.Choice(name="ron", value="ron")
+    app_commands.Choice(name="ron", value="ron"),
+    app_commands.Choice(name="refresh", value="refresh")
 ])
 async def gre(interaction: discord.Interaction, command: str):
     try:
@@ -99,6 +100,7 @@ async def gre(interaction: discord.Interaction, command: str):
             /gre positions - List outstanding positions
             /gre summary - Show account summary
             /gre ron - Show Return on Notional
+            /gre refresh - Reflect new trades
             """
             await interaction.response.send_message(help_text)
             return
@@ -127,6 +129,17 @@ async def gre(interaction: discord.Interaction, command: str):
             result = account_summary_command(mz_data)
         elif command == 'ron':
             result = ron_command(mz_data)
+        elif command == 'refresh':
+            # User ID to TransactionData instance mapping            
+            global USER_DATA_MAPPING          
+            USER_DATA_MAPPING = {
+                '719322412138627560': TransactionData(MZFilePath, MZLOCLimit, MZLOCUsage),
+                '903135191365734400': TransactionData(NTFilePath, NTLOCLimit, NTLOCUsage)
+            }
+            # Process CSV for each TransactionData instance
+            for data_instance in USER_DATA_MAPPING.values():
+                data_instance.process_csv()
+            result = "Data refreshed successfully."
         else:
             result = f"Unknown command: {command}. Use `/gre help` for a list of available commands."
         
@@ -224,7 +237,7 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
 @app_commands.choices(command=[
     app_commands.Choice(name=cmd, value=cmd) for cmd in [
         "Add_Trade", "Close_Position", "Roll_Position", "Cov_Call",
-        "Assigned", "Cash_InOut", "Upd_LOC", "Manual", "Delete_Last", "Last_Trade"
+        "Assigned", "Cash_InOut", "Upd_LOC", "Delete_Last", "Last_Trade"
     ]
 ])
 async def transaction(
@@ -252,16 +265,29 @@ async def transaction(
             await process_add_trade(interaction, mz_data, acct, ticker, shares, currency)
         elif command == "Close_Position":
             await process_close_position(interaction, mz_data)
-        elif command in ["Roll_Position", "Cov_Call", "Assigned", "Cash_InOut", "Upd_LOC", "Manual", "Delete_Last", "Last_Trade"]:
+        elif command == "Last_Trade":
+            handler = LastTradeHandler(mz_data)
+            await handler.handle(interaction)
+        elif command == "Delete_Last":
+            handler = DeleteLastTradeHandler(mz_data)
+            await handler.handle(interaction)
+        elif command == "Cov_Call":
+            await process_cov_call(interaction, mz_data)
+        elif command == "Assigned":
+            await process_assigned(interaction, mz_data)
+        elif command == "Cash_InOut":
+            handler = CashInOutHandler(mz_data)
+            await handler.handle(interaction)
+        elif command in ["Roll_Position", "Upd_LOC"]:
             await interaction.response.send_message(f"{command} functionality not implemented yet.")
         else:
             await interaction.response.send_message(f"Unsupported trade type: {command}")
     
     except Exception as e:
+        logging.error(f"Error in handle_trade: {str(e)}")
         if not interaction.response.is_done():
             await interaction.response.send_message(f"An error occurred: {str(e)}")
         else:
             await interaction.followup.send(f"An error occurred: {str(e)}")
-        logging.error(f"Error in trade command: {str(e)}", exc_info=True)
 
 client.run(DISCORD_TOKEN)
