@@ -143,6 +143,7 @@ async def gre(interaction: discord.Interaction, command: str):
         else:
             result = f"Unknown command: {command}. Use `/gre help` for a list of available commands."
         
+        current_date = datetime(datetime.now().year, datetime.now().month, datetime.now().day)
         await interaction.followup.send(f"{command.capitalize()} as of {current_date.strftime('%Y-%m-%d')}:\n{result}")
 
     except Exception as e:
