@@ -1,7 +1,6 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-from config import *
 from transaction_data import TransactionData
 from datetime import datetime, timedelta
 from trade_commands import *
@@ -24,6 +23,8 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+MZFilePath = os.getenv('MZFilePath')
+NTFilePath = os.getenv('NTFilePath')
 
 intents = discord.Intents.default()
 intents.message_content = True
