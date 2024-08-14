@@ -34,11 +34,9 @@ class TransactionData:
             return
 
         with open(self.csv_path, 'r', encoding='utf-8-sig') as csvfile:
-            reader = csv.DictReader(csvfile)
-            print("CSV headers:", reader.fieldnames)
+            reader = csv.DictReader(csvfile)            
             
-            for row in reader:
-                print("Processing row:", row)
+            for row in reader:                
                 self.process_transaction(row)
         
         self.last_update = datetime.now()

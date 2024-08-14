@@ -19,7 +19,7 @@ from gre_commands import (
     ron_command
 )
 from data_commands import data_expiration, data_strike, data_call_vs_roll
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -34,8 +34,21 @@ class UnregisteredUserError(Exception):
 
 # User ID to TransactionData instance mapping
 USER_DATA_MAPPING = {
-    '719322412138627560': TransactionData(MZFilePath, MZLOCLimit, MZLOCUsage),
-    '903135191365734400': TransactionData(NTFilePath, NTLOCLimit, NTLOCUsage)
+    '719322412138627560': TransactionData(
+        MZFilePath,
+        float(os.getenv('719322412138627560_LOC_LIMIT', '0')),
+        float(os.getenv('719322412138627560_LOC_USAGE', '0'))
+    ),
+    '903135191365734400': TransactionData(
+        NTFilePath,
+        float(os.getenv('903135191365734400_LOC_LIMIT', '0')),
+        float(os.getenv('903135191365734400_LOC_USAGE', '0'))
+    )
+}
+
+USER_FILEPATH_MAPPING = {
+    '719322412138627560': MZFilePath,
+    '903135191365734400': NTFilePath
 }
 
 # Process CSV for each TransactionData instance
@@ -55,10 +68,48 @@ def get_user_data(user_id):
         raise UnregisteredUserError("User not registered!")
     return USER_DATA_MAPPING[str(user_id)]
 
+def get_user_filepath(user_id):
+    if str(user_id) not in USER_FILEPATH_MAPPING:
+        raise UnregisteredUserError("User not registered!")
+    return USER_FILEPATH_MAPPING[str(user_id)]
+
 def write_to_csv(file_path, data):
     with open(file_path, 'a', newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(data)
+
+def update_env_values(user_id, loc_limit, loc_usage):
+    # Load current .env file
+    load_dotenv()
+    
+    # Read the current .env file
+    with open(".env", "r") as file:
+        lines = file.readlines()
+    
+    # Update the values
+    updated_lines = []
+    for line in lines:
+        if line.startswith(f"{user_id}_LOC_LIMIT="):
+            updated_lines.append(f"{user_id}_LOC_LIMIT={loc_limit}\n")
+        elif line.startswith(f"{user_id}_LOC_USAGE="):
+            updated_lines.append(f"{user_id}_LOC_USAGE={loc_usage}\n")
+        else:
+            updated_lines.append(line)
+    
+    # Write the updated content back to the .env file
+    with open(".env", "w") as file:
+        file.writelines(updated_lines)
+    
+    # Reload the environment variables
+    load_dotenv()
+    
+    # Update the TransactionData instance
+    if str(user_id) in USER_DATA_MAPPING:
+        user_data = USER_DATA_MAPPING[str(user_id)]
+        user_data.LOCLimit = float(loc_limit)
+        user_data.LOCUsage = float(loc_usage)
+    
+    return f"Updated LOC Limit to {loc_limit} and LOC Usage to {loc_usage} for user {user_id}"
 
 @client.event
 async def on_ready():
@@ -131,10 +182,20 @@ async def gre(interaction: discord.Interaction, command: str):
             result = ron_command(mz_data)
         elif command == 'refresh':
             # User ID to TransactionData instance mapping            
-            global USER_DATA_MAPPING          
+            global USER_DATA_MAPPING
+            load_dotenv(override=True)
+            USER_DATA_MAPPING = None
             USER_DATA_MAPPING = {
-                '719322412138627560': TransactionData(MZFilePath, MZLOCLimit, MZLOCUsage),
-                '903135191365734400': TransactionData(NTFilePath, NTLOCLimit, NTLOCUsage)
+                '719322412138627560': TransactionData(
+                    MZFilePath,
+                    float(os.getenv('719322412138627560_LOC_LIMIT', '0')),
+                    float(os.getenv('719322412138627560_LOC_USAGE', '0'))
+                ),
+                '903135191365734400': TransactionData(
+                    NTFilePath,
+                    float(os.getenv('903135191365734400_LOC_LIMIT', '0')),
+                    float(os.getenv('903135191365734400_LOC_USAGE', '0'))
+                )
             }
             # Process CSV for each TransactionData instance
             for data_instance in USER_DATA_MAPPING.values():
@@ -237,7 +298,7 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
 )
 @app_commands.choices(command=[
     app_commands.Choice(name=cmd, value=cmd) for cmd in [
-        "Add_Trade", "Close_Position", "Roll_Position", "Cov_Call",
+        "Add_Trade", "Close_Position", "Roll_Position", "Cov_Call", "Send_CSV",
         "Assigned", "Cash_InOut", "Upd_LOC", "Delete_Last", "Last_Trade"
     ]
 ])
@@ -250,8 +311,8 @@ async def transaction(
     currency: Optional[str] = None
 ):
     try:
-        # Don't defer the response here
-        
+        # Don't defer the response here        
+
         try:
             mz_data = get_user_data(interaction.user.id)
             client.mz_data = mz_data
@@ -279,8 +340,37 @@ async def transaction(
         elif command == "Cash_InOut":
             handler = CashInOutHandler(mz_data)
             await handler.handle(interaction)
-        elif command in ["Roll_Position", "Upd_LOC"]:
-            await interaction.response.send_message(f"{command} functionality not implemented yet.")
+        elif command == "Upd_LOC":
+            # Get current values
+            current_limit = float(os.getenv(f"{interaction.user.id}_LOC_LIMIT", "0"))
+            current_usage = float(os.getenv(f"{interaction.user.id}_LOC_USAGE", "0"))
+            
+            # Call the handle_loc_update method from trade_commands
+            new_limit, new_usage = await handle_loc_update(interaction, current_limit, current_usage)
+            
+            if new_limit is not None and new_usage is not None:
+                # Update the .env file and TransactionData instance
+                result = update_env_values(interaction.user.id, new_limit, new_usage)
+                await interaction.followup.send(result)
+        elif command in ["Roll_Position"]:
+            handler = RollPositionHandler(mz_data)
+            await handler.handle(interaction)
+        elif command in ["Send_CSV"]:
+            await interaction.response.defer(thinking=True)
+            try:
+                # Get the file path for the specific user
+                file_path = get_user_filepath(interaction.user.id)
+                if not os.path.exists(file_path):
+                    await interaction.followup.send("Error: Your CSV file was not found.")
+                    return
+                file_name = os.path.basename(file_path)
+                # Send the file
+                await interaction.followup.send(file=discord.File(file_path, filename=file_name))
+            except UnregisteredUserError:
+                await interaction.followup.send("Error: You are not registered to use this command.")
+            except Exception as e:
+                await interaction.followup.send(f"An error occurred while sending the file: {str(e)}")
+                logging.error(f"Error in send_csv command: {str(e)}", exc_info=True)
         else:
             await interaction.response.send_message(f"Unsupported trade type: {command}")
     

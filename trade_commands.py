@@ -4,6 +4,7 @@ import asyncio
 import logging
 import configparser
 import os
+import re
 from discord import app_commands, ui
 from discord.ui import Select, View, Modal, TextInput
 from transaction_data import TransactionData
@@ -18,6 +19,10 @@ def parse_number(value: str) -> float:
     except ValueError:
         print(f"Warning: Could not parse '{value}' as a number. Using 0.")
         return 0
+
+def parse_currency(value: str) -> float:
+    """Parse a currency string into a float."""
+    return float(re.sub(r'[^\d.-]', '', value))
 
 def format_number(value: Union[str, int, float], is_currency: bool = False) -> str:
     try:
@@ -654,6 +659,207 @@ class CashInOutModal(discord.ui.Modal):
         except ValueError as e:
             await interaction.response.send_message(f"Error in input: {str(e)}", ephemeral=True)
 
+# RollPositionHandler Class and Modal
+class RollPositionHandler(TradeHandler):
+    async def handle(self, interaction: discord.Interaction):
+        options = await self.get_options()
+        if not options:
+            await interaction.response.send_message("No open positions available to roll.")
+            return
+
+        await self.show_selection(interaction, options)
+
+    async def get_options(self) -> List[Dict[str, Any]]:
+        positions = get_outstanding_positions(self.mz_data)
+        return [{
+            'label': f"{pos['Ticker']} ({pos['Type']}) @ {pos['Strike/Price']} on {pos['Expiry']} x {abs(float(pos['Shares']))}",
+            'value': pos
+        } for pos in positions]
+
+    async def show_selection(self, interaction: discord.Interaction, options: List[Dict[str, Any]]):
+        select = discord.ui.Select(
+            placeholder="Choose a position to roll",
+            options=[discord.SelectOption(label=option['label'], value=str(i)) for i, option in enumerate(options)]
+        )
+
+        async def select_callback(select_interaction: discord.Interaction):
+            option_id = int(select_interaction.data["values"][0])
+            selected_option = options[option_id]
+            await self.show_form(select_interaction, selected_option)
+
+        select.callback = select_callback
+        view = discord.ui.View()
+        view.add_item(select)
+        
+        await interaction.response.send_message("Please select a position to roll:", view=view)
+
+    async def show_form(self, interaction: discord.Interaction, selected_option: Dict[str, Any]):
+        if selected_option['value']['Type'] in ['Put', 'Call']:
+            modal = RollOptionModal(selected_option['value'])
+        else:
+            modal = RollStockModal(selected_option['value'])
+        await interaction.response.send_modal(modal)
+
+    async def process_form(self, interaction: discord.Interaction, form_data: Dict[str, Any]):
+        position = form_data['position']
+        
+        if position['Type'] in ['Put', 'Call']:
+            close_transaction = {
+                'Acct': position['Acct'],
+                'Ticker': position['Ticker'],
+                'Currency': position['Currency'],
+                'Margin %': position['Margin %'],
+                'Date': form_data['date'],
+                'Trans Type': position['Type'],
+                'Shares': format_number(-float(position['Shares'])),
+                'Strike/Price': position['Strike/Price'],
+                'Expiry': position['Expiry'],
+                'Net Gains': format_number(-float(form_data['cost_to_close'])),
+                'Notes': 'Closing for roll'
+            }
+            
+            new_transaction = {
+                'Acct': position['Acct'],
+                'Ticker': position['Ticker'],
+                'Currency': position['Currency'],
+                'Margin %': position['Margin %'],
+                'Date': form_data['date'],
+                'Trans Type': position['Type'],
+                'Shares': position['Shares'],
+                'Strike/Price': format_number(form_data['new_strike']),
+                'Expiry': form_data['new_expiry'],
+                'Net Gains': format_number(float(form_data['new_proceeds'])),
+                'Notes': 'New position from roll'
+            }
+        else:  # Stock
+            current_notional = abs(parse_currency(position['Net Gains']))
+            close_transaction = {
+                'Acct': position['Acct'],
+                'Ticker': position['Ticker'],
+                'Currency': position['Currency'],
+                'Margin %': position['Margin %'],
+                'Date': form_data['date'],
+                'Trans Type': 'Stk',
+                'Shares': format_number(-float(position['Shares'])),
+                'Strike/Price': '0',
+                'Expiry': '9999-12-31',
+                'Net Gains': format_number(current_notional),  # Positive value
+                'Notes': 'Closing stock for roll'
+            }
+            
+            new_net_gains = float(form_data['sale_proceeds']) - current_notional + float(form_data['new_proceeds'])
+            new_transaction = {
+                'Acct': position['Acct'],
+                'Ticker': position['Ticker'],
+                'Currency': position['Currency'],
+                'Margin %': position['Margin %'],
+                'Date': form_data['date'],
+                'Trans Type': 'Put',
+                'Shares': position['Shares'],
+                'Strike/Price': format_number(form_data['new_strike']),
+                'Expiry': form_data['new_expiry'],
+                'Net Gains': format_number(new_net_gains),
+                'Notes': 'New put from stock roll'
+            }
+        
+        return [close_transaction, new_transaction]
+
+class RollOptionModal(discord.ui.Modal):
+    def __init__(self, position: Dict[str, Any]):
+        super().__init__(title=f"Roll {position['Type']}: {position['Ticker']}")
+        self.position = position
+
+        self.add_item(discord.ui.TextInput(
+            label="Transaction Date (YYYY-MM-DD)", 
+            default=datetime.now().strftime('%Y-%m-%d')
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="New Strike",
+            placeholder="e.g. 50.00"
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="New Expiration Date (YYYY-MM-DD)",
+            placeholder="e.g. 2023-12-15"
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="Cost to Close (positive)",
+            placeholder="e.g. 500.25"
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="New Proceeds (positive)",
+            placeholder="e.g. 600.50"
+        ))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            form_data = {
+                'position': self.position,
+                'date': self.children[0].value,
+                'new_strike': float(self.children[1].value),
+                'new_expiry': self.children[2].value,
+                'cost_to_close': float(self.children[3].value),
+                'new_proceeds': float(self.children[4].value)
+            }
+            
+            handler = RollPositionHandler(interaction.client.mz_data)
+            transactions = await handler.process_form(interaction, form_data)
+            transactions_display = "\n\n".join([format_transaction_display(t) for t in transactions])
+            await interaction.followup.send(
+                f"New transaction(s) to be added:\n```\n{transactions_display}\n```\nDo you want to add these transactions?",
+                view=ConfirmView(transactions)
+            )
+        except ValueError as e:
+            await interaction.followup.send(f"Error in input: {str(e)}", ephemeral=True)
+
+class RollStockModal(discord.ui.Modal):
+    def __init__(self, position: Dict[str, Any]):
+        super().__init__(title=f"Roll Stock: {position['Ticker']}")
+        self.position = position
+
+        self.add_item(discord.ui.TextInput(
+            label="Transaction Date (YYYY-MM-DD)", 
+            default=datetime.now().strftime('%Y-%m-%d')
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="New Strike",
+            placeholder="e.g. 50.00"
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="New Expiration Date (YYYY-MM-DD)",
+            placeholder="e.g. 2023-12-15"
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="Sale Proceeds (positive)",
+            placeholder="e.g. 5000.00"
+        ))
+        self.add_item(discord.ui.TextInput(
+            label="New Proceeds (positive)",
+            placeholder="e.g. 600.50"
+        ))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            form_data = {
+                'position': self.position,
+                'date': self.children[0].value,
+                'new_strike': float(self.children[1].value),
+                'new_expiry': self.children[2].value,
+                'sale_proceeds': float(self.children[3].value),
+                'new_proceeds': float(self.children[4].value)
+            }
+            
+            handler = RollPositionHandler(interaction.client.mz_data)
+            transactions = await handler.process_form(interaction, form_data)
+            transactions_display = "\n\n".join([format_transaction_display(t) for t in transactions])
+            await interaction.followup.send(
+                f"New transaction(s) to be added:\n```\n{transactions_display}\n```\nDo you want to add these transactions?",
+                view=ConfirmView(transactions)
+            )
+        except ValueError as e:
+            await interaction.followup.send(f"Error in input: {str(e)}", ephemeral=True)
+
 # ConfirmView class
 class ConfirmView(discord.ui.View):
     def __init__(self, transactions: List[Dict[str, Any]]):
@@ -838,3 +1044,23 @@ async def process_assigned(interaction: discord.Interaction, mz_data: Transactio
     handler = AssignedHandler(mz_data)
     await interaction.response.defer(thinking=True)
     await handler.handle(interaction)
+
+async def handle_loc_update(interaction: discord.Interaction, current_limit: float, current_usage: float):
+    class LOCUpdateModal(discord.ui.Modal, title="Update LOC Values"):
+        loc_limit = discord.ui.TextInput(label="LOC Limit", default=str(current_limit))
+        loc_usage = discord.ui.TextInput(label="LOC Usage", default=str(current_usage))
+
+        async def on_submit(self, interaction: discord.Interaction):
+            try:
+                new_limit = float(self.loc_limit.value)
+                new_usage = float(self.loc_usage.value)
+                await interaction.response.defer()
+                return new_limit, new_usage
+            except ValueError:
+                await interaction.response.send_message("Invalid input. Please enter numeric values.")
+                return None, None
+
+    modal = LOCUpdateModal()
+    await interaction.response.send_modal(modal)
+    await modal.wait()
+    return modal.loc_limit.value, modal.loc_usage.value
