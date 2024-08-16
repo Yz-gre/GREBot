@@ -4,7 +4,11 @@ from discord.ext import commands
 from transaction_data import TransactionData
 from datetime import datetime, timedelta
 from trade_commands import *
+from daily_risk import *
 from typing import Optional
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from pytz import timezone
 import os
 import logging
 import csv
@@ -25,6 +29,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 MZFilePath = os.getenv('MZFilePath')
 NTFilePath = os.getenv('NTFilePath')
+WaryPath = os.getenv('Wariness')
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -381,5 +386,18 @@ async def transaction(
             await interaction.response.send_message(f"An error occurred: {str(e)}")
         else:
             await interaction.followup.send(f"An error occurred: {str(e)}")
+
+
+scheduler = BackgroundScheduler(timezone=timezone('US/Eastern'))
+csv_path = WaryPath  # Update this path
+
+scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+                  CronTrigger(day_of_week='mon-fri', hour=10, minute=0))
+scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+                  CronTrigger(day_of_week='mon-fri', hour=13, minute=0))
+scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+                  CronTrigger(day_of_week='mon-fri', hour=16, minute=15))
+
+scheduler.start()
 
 client.run(DISCORD_TOKEN)
