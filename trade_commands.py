@@ -860,6 +860,97 @@ class RollStockModal(discord.ui.Modal):
         except ValueError as e:
             await interaction.followup.send(f"Error in input: {str(e)}", ephemeral=True)
 
+# InterestPaymentHandler Class and Modal
+class InterestPaymentHandler(TradeHandler):
+    async def handle(self, interaction: discord.Interaction):
+        await self.show_form(interaction)
+
+    async def show_form(self, interaction: discord.Interaction):
+        modal = InterestPaymentModal(self.mz_data)
+        await interaction.response.send_modal(modal)
+
+    async def process_form(self, interaction: discord.Interaction, form_data: Dict[str, Any]):
+        # Validate account
+        if form_data['account'] not in self.mz_data.get_accounts():
+            raise ValueError(f"Invalid account: {form_data['account']}")
+
+        # Validate currency
+        if form_data['currency'] not in ['CAD', 'USD']:
+            raise ValueError(f"Invalid currency: {form_data['currency']}")
+
+        transaction = {
+            'Acct': form_data['account'],
+            'Ticker': 'Other',
+            'Currency': form_data['currency'],
+            'Margin %': '0',
+            'Date': form_data['date'],
+            'Trans Type': 'Int / Tax',
+            'Shares': '0',
+            'Strike/Price': '0',
+            'Expiry': '9999-12-31',
+            'Net Gains': format_number(form_data['amount']),  # Negative amount for payment
+            'Notes': 'Operational Loss - Interest Payments from Negative Balances'
+        }
+        return [transaction]
+
+class InterestPaymentModal(discord.ui.Modal):
+    def __init__(self, mz_data: TransactionData):
+        super().__init__(title="Interest Payment Transaction")
+        self.mz_data = mz_data
+
+        self.add_item(discord.ui.TextInput(
+            label="Transaction Date (YYYY-MM-DD)",
+            default=datetime.now().strftime('%Y-%m-%d')
+        ))
+
+        default_account = self.get_last_account()
+        self.add_item(discord.ui.TextInput(
+            label="Account",
+            placeholder="Enter account name",
+            default=default_account or ""
+        ))
+
+        self.add_item(discord.ui.TextInput(
+            label="Currency (CAD or USD)",
+            default="USD"
+        ))
+
+        self.add_item(discord.ui.TextInput(
+            label="Amount",
+            placeholder="e.g. 50.25"
+        ))
+
+    def get_last_account(self):
+        try:
+            with open(self.mz_data.csv_path, 'r', newline='', encoding='utf-8-sig') as csvfile:
+                reader = csv.DictReader(csvfile)
+                last_row = None
+                for row in reader:
+                    last_row = row
+                return last_row['Acct'] if last_row else None
+        except Exception as e:
+            logging.error(f"Error reading CSV file: {str(e)}")
+            return None
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            form_data = {
+                'date': self.children[0].value,
+                'account': self.children[1].value,
+                'currency': self.children[2].value.upper(),
+                'amount': float(self.children[3].value.replace('$', '').replace(',', ''))
+            }
+            
+            handler = InterestPaymentHandler(interaction.client.mz_data)
+            transactions = await handler.process_form(interaction, form_data)
+            transactions_display = "\n\n".join([format_transaction_display(t) for t in transactions])
+            await interaction.response.send_message(
+                f"New transaction(s) to be added:\n```\n{transactions_display}\n```\nDo you want to add these transactions?",
+                view=ConfirmView(transactions)
+            )
+        except ValueError as e:
+            await interaction.response.send_message(f"Error in input: {str(e)}", ephemeral=True)
+
 # ConfirmView class
 class ConfirmView(discord.ui.View):
     def __init__(self, transactions: List[Dict[str, Any]]):

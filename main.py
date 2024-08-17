@@ -305,7 +305,7 @@ async def data(interaction: discord.Interaction, command: str, ticker: str = Non
 @app_commands.choices(command=[
     app_commands.Choice(name=cmd, value=cmd) for cmd in [
         "Add_Trade", "Close_Position", "Roll_Position", "Cov_Call", "Send_CSV",
-        "Assigned", "Cash_InOut", "Upd_LOC", "Delete_Last", "Last_Trade"
+        "Assigned", "Cash_InOut", "Upd_LOC", "Delete_Last", "Last_Trade", "Int_Pay"
     ]
 ])
 async def transaction(
@@ -358,10 +358,13 @@ async def transaction(
                 # Update the .env file and TransactionData instance
                 result = update_env_values(interaction.user.id, new_limit, new_usage)
                 await interaction.followup.send(result)
-        elif command in ["Roll_Position"]:
+        elif command == "Roll_Position":
             handler = RollPositionHandler(mz_data)
             await handler.handle(interaction)
-        elif command in ["Send_CSV"]:
+        elif command == "Int_Pay":
+            handler = InterestPaymentHandler(mz_data)
+            await handler.handle(interaction)
+        elif command == "Send_CSV":
             await interaction.response.defer(thinking=True)
             try:
                 # Get the file path for the specific user
@@ -392,12 +395,11 @@ scheduler = BackgroundScheduler(timezone=timezone('US/Eastern'))
 csv_path = WaryPath  # Update this path
 
 scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
-                  CronTrigger(hour=18, minute=30))
-#                  CronTrigger(day_of_week='mon-fri', hour=10, minute=0))
-#scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
-#                  CronTrigger(day_of_week='mon-fri', hour=13, minute=0))
-#scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
-#                  CronTrigger(day_of_week='mon-fri', hour=16, minute=15))
+                  CronTrigger(day_of_week='mon-fri', hour=14, minute=0))
+scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+                  CronTrigger(day_of_week='mon-fri', hour=17, minute=0))
+scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+                  CronTrigger(day_of_week='mon-fri', hour=20, minute=15))
 
 scheduler.start()
 
