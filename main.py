@@ -392,11 +392,12 @@ scheduler = BackgroundScheduler(timezone=timezone('US/Eastern'))
 csv_path = WaryPath  # Update this path
 
 scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
-                  CronTrigger(day_of_week='mon-fri', hour=10, minute=0))
-scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
-                  CronTrigger(day_of_week='mon-fri', hour=13, minute=0))
-scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
-                  CronTrigger(day_of_week='mon-fri', hour=16, minute=15))
+                  CronTrigger(hour=18, minute=30))
+#                  CronTrigger(day_of_week='mon-fri', hour=10, minute=0))
+#scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+#                  CronTrigger(day_of_week='mon-fri', hour=13, minute=0))
+#scheduler.add_job(lambda: write_daily_risk_to_csv(csv_path, USER_DATA_MAPPING), 
+#                  CronTrigger(day_of_week='mon-fri', hour=16, minute=15))
 
 scheduler.start()
 
