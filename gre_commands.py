@@ -36,8 +36,8 @@ def revenue_command(transaction_data: TransactionData) -> str:
     print(f"Current date: {current_date}")
     
     periods = {
-        'MTD': (current_date.replace(day=1), current_date),
-        'YTD': (current_date.replace(month=1, day=1), current_date),
+        'MTD': (current_date.replace(day=1) - timedelta(days=1), current_date),
+        'YTD': (current_date.replace(month=1, day=1) - timedelta(days=1), current_date),
         'L3M': (current_date - timedelta(days=90), current_date),
         'L6M': (current_date - timedelta(days=180), current_date),
         'L12M': (current_date - timedelta(days=365), current_date),
@@ -653,9 +653,9 @@ def account_summary_command(transaction_data: TransactionData) -> str:
     print(f"Cover percentages: {cover_percent}")
 
     print("\nCalculating MTD and LM revenue")
-    mtd_start = current_date.replace(day=1)
-    lm_start = (mtd_start - timedelta(days=1)).replace(day=1)
-    lm_end = mtd_start - timedelta(days=1)
+    mtd_start = current_date.replace(day=1) - timedelta(days=1)
+    lm_start = mtd_start.replace(day=1) - timedelta(days=1)
+    lm_end = mtd_start
 
     mtd_revenue = {acc: sum(get_balance('revenue', account=acc, currency=curr) for curr in ['USD', 'CAD']) 
                    - sum(get_balance('revenue', account=acc, currency=curr, date=mtd_start) for curr in ['USD', 'CAD'])
@@ -726,7 +726,7 @@ def ron_command(transaction_data: TransactionData) -> str:
         revenue = 0
         for currency in ['USD', 'CAD']:
             print(f"  Processing currency: {currency}")
-            _, start_breakdown = transaction_data.get_spot_balance(start_date, 'revenue', currency=currency)
+            _, start_breakdown = transaction_data.get_spot_balance(start_date - timedelta(days=1), 'revenue', currency=currency)
             _, end_breakdown = transaction_data.get_spot_balance(end_date, 'revenue', currency=currency)
             
             print(f"    Start breakdown: {start_breakdown}")
